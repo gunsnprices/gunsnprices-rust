@@ -49,3 +49,8 @@ required-features = ["cli"]
 
 [package.metadata.docs.rs]
 all-features = true
+
+# the tests compile ~5,000 regular expressions: optimize the regex crates in debug builds too
+# (applies only when this crate is built on its own, not as a dependency)
+[profile.dev.package."*"]
+opt-level = 3
