@@ -58,7 +58,7 @@ cargo publish                             # uploads; needs the token from step 2
 git tag v0.1.0 && git push origin v0.1.0
 ```
 
-`cargo publish --dry-run` passed on 2026-11-10 (the packaged crate is about 70 KiB compressed).
+`cargo publish --dry-run` passed on 2026-11-10 (25 files, 169 KiB compressed).
 
 Checks crates.io does on upload that `--dry-run` can't: the e-mail must be verified, the token must have
 `publish-new` for a new crate, and the `license` must be a valid SPDX expression — `MIT AND CC-BY-4.0` is (checked with
