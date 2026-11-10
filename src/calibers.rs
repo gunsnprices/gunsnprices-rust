@@ -384,7 +384,7 @@ fn ci_alnum(c: char) -> bool {
 
 impl Spellings {
     fn new(alternatives: &[&str]) -> Spellings {
-        let t = translate(&alternatives.join("|")).unwrap_or_else(|e| panic!("caliber spellings: {e}"));
+        let t = translate(&alternatives.join("|"), true).unwrap_or_else(|e| panic!("caliber spellings: {e}"));
         assert!(!t.fancy, "caliber spellings must not need look-around");
         let pattern = format!(
             r"(?i)(?:{})(?-i:[^a-zA-Z0-9\x{{130}}\x{{131}}\x{{17F}}\x{{212A}}])",

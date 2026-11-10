@@ -169,7 +169,8 @@ The rules are compiled on first use (about 0.1 s in a release build); after that
 The rules are written in Python's regular expression syntax. Patterns without look-around run on the
 [`regex`](https://crates.io/crates/regex) crate (linear time); the ones that need look-around run on
 [`fancy-regex`](https://crates.io/crates/fancy-regex), behind a look-around-free prefilter that skips the backtracking
-search when it cannot match.
+search when it cannot match. The translation keeps Python's meaning of `\w`, `\s`, `$` and word boundaries (a
+combining mark is not a word character, `½` is) and of case-insensitive `i` (it also matches `ı` and `İ`).
 
 ## Accuracy
 

@@ -6,9 +6,12 @@
 //!
 //! * the syntax is translated: `\s` also covers U+001C..U+001F, `\w` is `[\p{L}\p{N}_]` (Python's `str.isalnum()`
 //!   plus `_`), `$` also matches before a final newline, `{` that is not a repetition is a literal, `[` inside a class
-//!   is a literal, `\<` is a literal;
+//!   is a literal, `\<` is a literal, and with `re.I` the letter i also matches "ı" and "İ" like in Python;
 //! * a pattern without look-around or backreferences is compiled with the [`regex`] crate (finite automata, linear
-//!   time); only patterns that use look-around are compiled with [`fancy_regex`] (backtracking, like Python).
+//!   time); only patterns that use look-around are compiled with [`fancy_regex`] (backtracking, like Python);
+//! * `\b` runs natively unless the text has a character that the crates count as a word character and Python does not
+//!   (combining marks, connector punctuation) or the other way round (`½`, `²`); then a look-around version with
+//!   Python's word characters is used.
 //!
 //! Both engines use leftmost-first alternation, so the match found is the one Python finds. Patterns are compiled on
 //! first use, and a backtracking pattern is only run when the same pattern without its look-around (a plain regex
@@ -36,6 +39,40 @@ pub(crate) struct Rx {
     relaxed: Option<String>,
     fancy: bool,
     engine: OnceLock<Engine>,
+    /// The pattern with `\b`/`\B` spelled out with Python's word characters (`None` without word boundaries), for
+    /// texts where the crates' word characters differ from Python's.
+    exact: Option<String>,
+    /// Prefilter for `exact`: the pattern without look-around and without word boundaries (a superset).
+    exact_pre: Option<String>,
+    exact_engine: OnceLock<(fancy_regex::Regex, Option<regex::Regex>)>,
+}
+
+/// The engine chosen for one text.
+enum Use<'a> {
+    Plain(&'a regex::Regex),
+    Fancy(&'a fancy_regex::Regex, Option<&'a regex::Regex>),
+}
+
+/// The text has a character whose "word character" status differs between the crates' `\b` (Unicode `\w`:
+/// alphabetic, marks, decimal digits, connector punctuation, join controls) and Python's `\w` (letters, digits,
+/// numerics, `_`). ASCII text never has one.
+fn needs_exact(s: &str) -> bool {
+    static RISKY: OnceLock<regex::Regex> = OnceLock::new();
+    !s.is_ascii()
+        && RISKY
+            .get_or_init(|| {
+                regex::Regex::new(r"[\w--[\p{L}\p{N}_]]|[[\p{L}\p{N}_]--\w]").unwrap_or_else(|e| panic!("{e}"))
+            })
+            .is_match(s)
+}
+
+fn fancy_regex(pattern: &str) -> Result<fancy_regex::Regex, String> {
+    fancy_regex::RegexBuilder::new(pattern)
+        .backtrack_limit(BACKTRACK_LIMIT)
+        .delegate_size_limit(64 << 20)
+        .delegate_dfa_size_limit(64 << 20)
+        .build()
+        .map_err(|e| e.to_string())
 }
 
 /// Capture group spans of one match, as byte offsets into the searched text.
@@ -84,13 +121,16 @@ impl Rx {
     /// Translate a Python pattern; `ignore_case` is Python's `re.I`. Panics on a pattern it cannot translate, which
     /// only happens for patterns that are not in this crate (the test suite compiles every rule).
     pub(crate) fn new(py_pattern: &str, ignore_case: bool) -> Rx {
-        let t = translate(py_pattern).unwrap_or_else(|e| panic!("bad pattern {py_pattern:?}: {e}"));
+        let t = translate(py_pattern, ignore_case).unwrap_or_else(|e| panic!("bad pattern {py_pattern:?}: {e}"));
         let flag = if ignore_case { "(?i)" } else { "" };
         Rx {
             pattern: format!("{flag}{}", t.pattern),
             relaxed: t.fancy.then(|| format!("{flag}{}", t.relaxed)),
             fancy: t.fancy,
             engine: OnceLock::new(),
+            exact: t.has_b.then(|| format!("{flag}{}", t.exact)),
+            exact_pre: t.has_b.then(|| format!("{flag}{}", t.relaxed_no_b)),
+            exact_engine: OnceLock::new(),
         }
     }
 
@@ -98,14 +138,24 @@ impl Rx {
         if !self.fancy {
             return plain_regex(&self.pattern).map(Engine::Plain);
         }
-        let re = fancy_regex::RegexBuilder::new(&self.pattern)
-            .backtrack_limit(BACKTRACK_LIMIT)
-            .delegate_size_limit(64 << 20)
-            .delegate_dfa_size_limit(64 << 20)
-            .build()
-            .map_err(|e| e.to_string())?;
+        let re = fancy_regex(&self.pattern)?;
         let pre = self.relaxed.as_deref().and_then(|p| plain_regex(p).ok());
         Ok(Engine::Fancy { re, pre })
+    }
+
+    /// The engine for `s`: the look-around version (without prefilter) when `s` needs it.
+    fn pick(&self, s: &str) -> Use<'_> {
+        if let Some(exact) = self.exact.as_deref().filter(|_| needs_exact(s)) {
+            let (re, pre) = self.exact_engine.get_or_init(|| {
+                let re = fancy_regex(exact).unwrap_or_else(|e| panic!("bad pattern {exact:?}: {e}"));
+                (re, self.exact_pre.as_deref().and_then(|p| plain_regex(p).ok()))
+            });
+            return Use::Fancy(re, pre.as_ref());
+        }
+        match self.engine() {
+            Engine::Plain(r) => Use::Plain(r),
+            Engine::Fancy { re, pre } => Use::Fancy(re, pre.as_ref()),
+        }
     }
 
     fn engine(&self) -> &Engine {
@@ -115,10 +165,11 @@ impl Rx {
         })
     }
 
-    /// Compile now (tests use it to check every rule).
+    /// Compile now, with the look-around version (tests use it to check every rule).
     #[cfg(test)]
     pub(crate) fn compile(&self) -> Result<(), String> {
-        self.build().map(|_| ())
+        self.build()?;
+        self.exact.as_deref().map_or(Ok(()), |p| fancy_regex(p).map(|_| ()))
     }
 
     /// True if the pattern needs the backtracking engine.
@@ -128,15 +179,15 @@ impl Rx {
     }
 
     /// The prefilter of a fancy pattern says there is no match at or after `pos`.
-    fn ruled_out(pre: &Option<regex::Regex>, s: &str, pos: usize) -> bool {
-        pre.as_ref().is_some_and(|p| p.find_at(s, pos).is_none())
+    fn ruled_out(pre: Option<&regex::Regex>, s: &str, pos: usize) -> bool {
+        pre.is_some_and(|p| p.find_at(s, pos).is_none())
     }
 
     /// Python `rx.search(s) is not None`.
     pub(crate) fn is_match(&self, s: &str) -> bool {
-        match self.engine() {
-            Engine::Plain(r) => r.is_match(s),
-            Engine::Fancy { re, pre } => !Rx::ruled_out(pre, s, 0) && re.is_match(s).unwrap_or(false),
+        match self.pick(s) {
+            Use::Plain(r) => r.is_match(s),
+            Use::Fancy(re, pre) => !Rx::ruled_out(pre, s, 0) && re.is_match(s).unwrap_or(false),
         }
     }
 
@@ -147,9 +198,9 @@ impl Rx {
 
     /// The first match starting at byte `pos` or later; the text before `pos` is still seen by look-behind and `\b`.
     pub(crate) fn find_at(&self, s: &str, pos: usize) -> Option<(usize, usize)> {
-        match self.engine() {
-            Engine::Plain(r) => r.find_at(s, pos).map(|m| (m.start(), m.end())),
-            Engine::Fancy { re, pre } => {
+        match self.pick(s) {
+            Use::Plain(r) => r.find_at(s, pos).map(|m| (m.start(), m.end())),
+            Use::Fancy(re, pre) => {
                 if Rx::ruled_out(pre, s, pos) {
                     return None;
                 }
@@ -166,9 +217,9 @@ impl Rx {
 
     /// Python `rx.finditer(s)`: spans of all non-overlapping matches.
     pub(crate) fn find_iter(&self, s: &str) -> Vec<(usize, usize)> {
-        match self.engine() {
-            Engine::Plain(r) => r.find_iter(s).map(|m| (m.start(), m.end())).collect(),
-            Engine::Fancy { re, pre } => {
+        match self.pick(s) {
+            Use::Plain(r) => r.find_iter(s).map(|m| (m.start(), m.end())).collect(),
+            Use::Fancy(re, pre) => {
                 if Rx::ruled_out(pre, s, 0) {
                     return Vec::new();
                 }
@@ -182,9 +233,9 @@ impl Rx {
 
     /// Python `rx.search(s)` with groups.
     pub(crate) fn captures<'t>(&self, s: &'t str) -> Option<Caps<'t>> {
-        let spans = match self.engine() {
-            Engine::Plain(r) => r.captures(s).map(|c| spans_of(&c)),
-            Engine::Fancy { re, pre } => {
+        let spans = match self.pick(s) {
+            Use::Plain(r) => r.captures(s).map(|c| spans_of(&c)),
+            Use::Fancy(re, pre) => {
                 if Rx::ruled_out(pre, s, 0) {
                     return None;
                 }
@@ -196,9 +247,9 @@ impl Rx {
 
     /// Python `rx.finditer(s)` with groups.
     pub(crate) fn captures_iter<'t>(&self, s: &'t str) -> Vec<Caps<'t>> {
-        let all: Vec<Vec<Option<(usize, usize)>>> = match self.engine() {
-            Engine::Plain(r) => r.captures_iter(s).map(|c| spans_of(&c)).collect(),
-            Engine::Fancy { re, pre } => {
+        let all: Vec<Vec<Option<(usize, usize)>>> = match self.pick(s) {
+            Use::Plain(r) => r.captures_iter(s).map(|c| spans_of(&c)).collect(),
+            Use::Fancy(re, pre) => {
                 if Rx::ruled_out(pre, s, 0) {
                     return Vec::new();
                 }
@@ -248,7 +299,7 @@ impl AnyRx {
         }
         let (fancy, plain): (Vec<&String>, Vec<&String>) = patterns
             .iter()
-            .partition(|p| translate(p).map(|t| t.fancy).unwrap_or(true));
+            .partition(|p| translate(p, ignore_case).map(|t| t.fancy).unwrap_or(true));
         let mut parts = Vec::new();
         if !plain.is_empty() {
             let joined: Vec<&str> = plain.iter().map(|p| p.as_str()).collect();
@@ -342,6 +393,15 @@ pub(crate) fn py_template(repl: &str) -> Result<Template, String> {
 
 const PY_SPACE: &str = r"\s\x1C-\x1F";
 const PY_WORD: &str = r"\p{L}\p{N}_";
+/// `\b` and `\B` with Python's word characters.
+const PY_B: &str = r"(?:(?<=[\p{L}\p{N}_])(?![\p{L}\p{N}_])|(?<![\p{L}\p{N}_])(?=[\p{L}\p{N}_]))";
+const PY_NOT_B: &str = r"(?:(?<=[\p{L}\p{N}_])(?=[\p{L}\p{N}_])|(?<![\p{L}\p{N}_])(?![\p{L}\p{N}_]))";
+/// With `re.I`, Python matches "i" and "I" also to "ı" (U+0131) and "İ" (U+0130); the crates' case folding does not.
+const PY_I: &str = "iI\u{131}\u{130}";
+
+fn is_i(c: char) -> bool {
+    matches!(c, 'i' | 'I' | '\u{130}' | '\u{131}')
+}
 
 fn hex_escape(cs: &[char], i: usize, n: usize) -> Result<(String, usize), String> {
     let digits: String = cs.get(i..i + n).ok_or("short escape")?.iter().collect();
@@ -415,13 +475,22 @@ pub(crate) struct Translated {
     pub(crate) relaxed: String,
     /// Needs the backtracking engine (look-around, backreferences, atomic groups).
     pub(crate) fancy: bool,
+    /// The pattern with `\b`/`\B` spelled out with Python's word characters (only meaningful when `has_b`).
+    pub(crate) exact: String,
+    /// The pattern has `\b` or `\B`.
+    pub(crate) has_b: bool,
+    /// `relaxed` without the word boundaries: matches whenever `exact` does.
+    pub(crate) relaxed_no_b: String,
 }
 
-/// Translate a Python pattern to the `regex`/`fancy-regex` dialect.
-pub(crate) fn translate(p: &str) -> Result<Translated, String> {
+/// Translate a Python pattern to the `regex`/`fancy-regex` dialect; `ignore_case` is Python's `re.I`.
+pub(crate) fn translate(p: &str, ignore_case: bool) -> Result<Translated, String> {
     let cs: Vec<char> = p.chars().collect();
     let mut out = String::with_capacity(p.len() + 16);
     let mut relaxed = String::with_capacity(p.len() + 16);
+    let mut exact = String::with_capacity(p.len() + 16);
+    let mut relaxed_no_b = String::with_capacity(p.len() + 16);
+    let mut has_b = false;
     let mut fancy = false;
     // open groups: true for a look-around group; `skip` = depth at which the outermost open look-around started
     let mut groups: Vec<bool> = Vec::new();
@@ -429,7 +498,16 @@ pub(crate) fn translate(p: &str) -> Result<Translated, String> {
     let mut i = 0;
     while i < cs.len() {
         let mark = out.len();
+        // what `exact` gets instead of the text added to `out` (word boundaries)
+        let mut exact_piece: Option<&str> = None;
         match cs[i] {
+            '\\' if matches!(cs.get(i + 1), Some('b' | 'B')) => {
+                let not = cs[i + 1] == 'B';
+                out.push_str(if not { r"\B" } else { r"\b" });
+                exact_piece = Some(if not { PY_NOT_B } else { PY_B });
+                has_b = true;
+                i += 2;
+            }
             '\\' => {
                 let (s, j, backref) = escape(&cs, i, false)?;
                 fancy |= backref;
@@ -443,14 +521,26 @@ pub(crate) fn translate(p: &str) -> Result<Translated, String> {
                     out.push('^');
                     i += 1;
                 }
+                // the class holds i, I, ı or İ (alone or in a range): with re.I it gets all four
+                let mut has_i = false;
                 if cs.get(i) == Some(&']') {
                     out.push_str(r"\]");
                     i += 1;
                 }
                 loop {
                     let c = *cs.get(i).ok_or("unterminated class")?;
+                    if c != '\\' && c != ']' {
+                        let hi = match (cs.get(i + 1), cs.get(i + 2)) {
+                            (Some('-'), Some(&h)) if h != ']' && h != '\\' => h,
+                            _ => c,
+                        };
+                        has_i |= ['I', 'i', '\u{130}', '\u{131}'].iter().any(|x| (c..=hi).contains(x));
+                    }
                     match c {
                         ']' => {
+                            if ignore_case && has_i {
+                                out.push_str(PY_I);
+                            }
                             out.push(']');
                             i += 1;
                             break;
@@ -502,8 +592,10 @@ pub(crate) fn translate(p: &str) -> Result<Translated, String> {
                 out.push(')');
                 i += 1;
                 if skip == Some(groups.len()) {
+                    // the closing parenthesis of a look-around: not in `relaxed`
                     skip = None;
-                    continue; // the closing parenthesis of a removed look-around
+                    exact.push(')');
+                    continue;
                 }
             }
             '$' => {
@@ -523,6 +615,12 @@ pub(crate) fn translate(p: &str) -> Result<Translated, String> {
                 out.push_str(r"\}");
                 i += 1;
             }
+            c if ignore_case && is_i(c) => {
+                out.push('[');
+                out.push_str(PY_I);
+                out.push(']');
+                i += 1;
+            }
             c => {
                 out.push(c);
                 i += 1;
@@ -530,12 +628,19 @@ pub(crate) fn translate(p: &str) -> Result<Translated, String> {
         }
         if skip.is_none() {
             relaxed.push_str(&out[mark..]);
+            if exact_piece.is_none() {
+                relaxed_no_b.push_str(&out[mark..]);
+            }
         }
+        exact.push_str(exact_piece.unwrap_or(&out[mark..]));
     }
     Ok(Translated {
         pattern: out,
         relaxed,
         fancy,
+        exact,
+        has_b,
+        relaxed_no_b,
     })
 }
 
@@ -639,7 +744,7 @@ mod tests {
 
     #[test]
     fn translation() {
-        let t = |p: &str| translate(p).unwrap();
+        let t = |p: &str| translate(p, false).unwrap();
         assert_eq!(t(r"\bfoo\s*x{2,}$").pattern, r"\bfoo[\s\x1C-\x1F]*x{2,}(?:\n?\z)");
         assert_eq!(t(r"a{,3}b{}c{").pattern, r"a{0,3}b\{\}c\{");
         assert_eq!(t(r"[\s\-&[]").pattern, r"[\s\x1C-\x1F\-\&\[]");
@@ -666,6 +771,23 @@ mod tests {
             Rx::new(r"\bglock gen\.? ?([1-6]) (\d{2})\b", true).replace_all("glock gen 5 19 mos", &t),
             "glock 19 gen 5 mos"
         );
+    }
+
+    #[test]
+    fn word_boundaries_and_case_like_python() {
+        // Python: a combining mark is not a word character, "½" is
+        let b = Rx::new(r"\b15gr\b", false);
+        assert!(b.is_match("1\u{20dd}15gr"));
+        assert!(b.is_match("x \u{301}15gr"));
+        assert!(!b.is_match("\u{bd}15gr"));
+        assert!(Rx::new(r"a\b", false).is_match("a\u{301}"));
+        let fancy = Rx::new(r"(?<!x)\b18\b", false);
+        assert_eq!(fancy.find("16\u{bd} 18\u{301}"), Some((5, 7)));
+        // re.I: "i" also matches dotless and dotted I
+        assert!(Rx::new("sarsilmaz", true).is_match("sars\u{131}lmaz"));
+        assert!(Rx::new("[a-z]", true).is_match("\u{130}"));
+        assert!(!Rx::new("[^a-z]", true).is_match("\u{131}"));
+        assert!(!Rx::new("sarsilmaz", false).is_match("sars\u{131}lmaz"));
     }
 
     #[test]
