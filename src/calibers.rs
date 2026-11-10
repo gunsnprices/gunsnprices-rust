@@ -108,7 +108,14 @@ fn synonyms(tok: &str) -> Option<&'static [&'static str]> {
         "government" => &["government", "govt", "gov"],
         "acp" => &["acp", "auto"],
         "auto" => &["auto", "acp"],
-        "s&w" => &["s&w", "s & w", "sw", "smith & wesson", "smith and wesson", "smith&wesson"],
+        "s&w" => &[
+            "s&w",
+            "s & w",
+            "sw",
+            "smith & wesson",
+            "smith and wesson",
+            "smith&wesson",
+        ],
         "blackout" => &["blackout", "blk", "black out"],
         "creedmoor" => &["creedmoor", "creed", "cm", "crd", "creedmore"],
         "parabellum" => &["parabellum", "para", "luger"],
@@ -123,7 +130,17 @@ fn synonyms(tok: &str) -> Option<&'static [&'static str]> {
 }
 
 /// A word that may be left out ("300 Blackout" for ".300 AAC Blackout").
-const OPTIONAL: [&str; 9] = ["aac", "nato", "win", "winchester", "rem", "remington", "sprg", "springfield", "government"];
+const OPTIONAL: [&str; 9] = [
+    "aac",
+    "nato",
+    "win",
+    "winchester",
+    "rem",
+    "remington",
+    "sprg",
+    "springfield",
+    "government",
+];
 const SEP: &str = r"[\s\-]*";
 
 /// Common title spellings that the synonym table does not produce, by caliber display name.
@@ -134,14 +151,28 @@ fn extra(name: &str) -> &'static [&'static str] {
         "6mm Creedmoor" => &["6 creedmoor"],
         ".22 LR" => &["22lr", "22 lr", "22 long rifle"],
         ".22 WMR" => &["22 mag", "22 magnum", "22 win mag", "22 wmr"],
-        "5.56×45mm NATO" => &["5.56 nato", "5.56mm nato", "556 nato", "5.56x45", "5.56", "5.56mm", "5.56 mm"],
+        "5.56×45mm NATO" => &[
+            "5.56 nato",
+            "5.56mm nato",
+            "556 nato",
+            "5.56x45",
+            "5.56",
+            "5.56mm",
+            "5.56 mm",
+        ],
         "7.62x51mm NATO" => &["7.62 nato", "7.62mm nato", "762 nato", "762x51"],
         "7.62x39mm" => &["762x39"],
         ".410 Bore" => &["410 ga", "410 gauge", "410 bore"],
         ".45 Colt" => &["45 lc", "45 long colt"],
         ".44 S&W Special" => &["44 spl", "44 special", "44 spcl"],
         ".38 S&W Special" => &["38 spl", "38 special", "38 spcl", "38 spc", "38 sp", "38 spp", "38+p"],
-        ".357 Mag" => &["357 rm", "357 rem mag", "357 rem magnum", "357 remington magnum", "357 remington mag"],
+        ".357 Mag" => &[
+            "357 rm",
+            "357 rem mag",
+            "357 rem magnum",
+            "357 remington magnum",
+            "357 remington mag",
+        ],
         "9×19mm Parabellum" => &["9mm luger", "9mm para", "9 mm luger", "9mm"],
         "10mm Auto" => &["10mm", "10 mm"],
         ".45 ACP" => &["45 acp", "45 auto", "45 automatic", "45 automatic colt pistol"],
@@ -172,16 +203,25 @@ fn extra(name: &str) -> &'static [&'static str] {
 /// A bare number or "Nmm" in a title is usually something else, not a caliber; these exceptions were checked
 /// against GunsNPrices listings (right in 97%+ of cases).
 const ALLOW_BARE: [&str; 17] = [
-    "380", "410", "9mm", "10mm", "10 mm", "5.56", "5.56mm", "5.56 mm", "243", ".243", "308", ".308", ".40", ".350", ".204",
-    "177", ".177",
+    "380", "410", "9mm", "10mm", "10 mm", "5.56", "5.56mm", "5.56 mm", "243", ".243", "308", ".308", ".40", ".350",
+    ".204", "177", ".177",
 ];
 
 /// Shotguns "O/U 12/28": gauge / barrel length; on ammo "20/25" is rounds per box / boxes per case;
 /// "20/28 gauge" is a two-gauge set. ".357/.38 Spl" names both cartridges.
 const CONTEXT: [(&str, &str); 4] = [
-    (r"(?<![a-z0-9./$#-])12/(?:1[89]|2\d|3[0-4])(?:\.5)?(?![\d/.])(?!\s*(?:ga|gauge|rd|round))", "12gauge"),
-    (r"(?<![a-z0-9./$#-])20/(?:18|18\.5|2[0-46-9]|3[0-2])(?![\d/.])(?!\s*(?:ga|gauge|rd|round))", "20gauge"),
-    (r"(?<![a-z0-9./$#-])28/(?:2[6-9]|3[0-2])(?![\d/.])(?!\s*(?:ga|gauge|rd|round))", "28gauge"),
+    (
+        r"(?<![a-z0-9./$#-])12/(?:1[89]|2\d|3[0-4])(?:\.5)?(?![\d/.])(?!\s*(?:ga|gauge|rd|round))",
+        "12gauge",
+    ),
+    (
+        r"(?<![a-z0-9./$#-])20/(?:18|18\.5|2[0-46-9]|3[0-2])(?![\d/.])(?!\s*(?:ga|gauge|rd|round))",
+        "20gauge",
+    ),
+    (
+        r"(?<![a-z0-9./$#-])28/(?:2[6-9]|3[0-2])(?![\d/.])(?!\s*(?:ga|gauge|rd|round))",
+        "28gauge",
+    ),
     (r"(?<![a-z0-9.$#-])\.?357(?=\s*/\s*\.?38)", "357mag"),
 ];
 
@@ -205,7 +245,7 @@ fn between_digits(s: &str, from: char, to: &str) -> String {
 
 /// Lookup key of a spelling: lower case, letters and digits only, "&" as "and", decimal points kept.
 fn key(s: &str) -> String {
-    let s = unescape(s).to_lowercase().replace('×', "x").replace('\u{445}', "x");
+    let s = unescape(s).to_lowercase().replace(['×', '\u{445}'], "x");
     let s = between_digits(&s, '.', "#");
     let s: String = s
         .chars()
@@ -346,7 +386,10 @@ impl Spellings {
     fn new(alternatives: &[&str]) -> Spellings {
         let t = translate(&alternatives.join("|")).unwrap_or_else(|e| panic!("caliber spellings: {e}"));
         assert!(!t.fancy, "caliber spellings must not need look-around");
-        let pattern = format!(r"(?i)(?:{})(?-i:[^a-zA-Z0-9\x{{130}}\x{{131}}\x{{17F}}\x{{212A}}])", t.pattern);
+        let pattern = format!(
+            r"(?i)(?:{})(?-i:[^a-zA-Z0-9\x{{130}}\x{{131}}\x{{17F}}\x{{212A}}])",
+            t.pattern
+        );
         let re = regex::RegexBuilder::new(&pattern)
             .size_limit(256 << 20)
             .dfa_size_limit(256 << 20)
@@ -363,7 +406,11 @@ impl Spellings {
         while pos <= s.len() {
             let Some(m) = self.re.find_at(&hay, pos) else { break };
             let start = m.start();
-            if s[..start].chars().next_back().is_some_and(|c| ci_alnum(c) || c == '.' || c == '$') {
+            if s[..start]
+                .chars()
+                .next_back()
+                .is_some_and(|c| ci_alnum(c) || c == '.' || c == '$')
+            {
                 pos = start + s[start..].chars().next().map_or(1, char::len_utf8);
                 continue;
             }
@@ -435,8 +482,13 @@ fn spelling_table(rows: &[Row]) -> Vec<(String, String, usize)> {
                 if cands.iter().all(|&(_, i)| i != ci) {
                     cands.push((c.n, ci));
                 }
-                pats.entry(k)
-                    .or_insert_with(|| if v != own || !v.contains('/') { spelling_rx(&v) } else { py_escape(&v) });
+                pats.entry(k).or_insert_with(|| {
+                    if v != own || !v.contains('/') {
+                        spelling_rx(&v)
+                    } else {
+                        py_escape(&v)
+                    }
+                });
             }
         }
     }
@@ -472,10 +524,7 @@ fn index() -> &'static Index {
         let alternatives: Vec<&str> = table.iter().map(|(_, p, _)| p.as_str()).collect();
         let big = Spellings::new(&alternatives);
         let by_key = table.into_iter().map(|(k, _, i)| (k, i)).collect();
-        let context = CONTEXT
-            .iter()
-            .map(|(p, id)| (Rx::new(p, false), by_id[id]))
-            .collect();
+        let context = CONTEXT.iter().map(|(p, id)| (Rx::new(p, false), by_id[id])).collect();
         Index {
             calibers,
             by_id,

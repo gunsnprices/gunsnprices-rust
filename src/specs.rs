@@ -200,7 +200,8 @@ pub fn barrel_length(title: &str) -> Option<f64> {
             continue;
         }
         if r.not_barrel_after.match_at(&s, m.end())
-            || r.not_barrel_before.is_match(&s[back_chars(&s, m.start(), 20)..m.start()])
+            || r.not_barrel_before
+                .is_match(&s[back_chars(&s, m.start(), 20)..m.start()])
         {
             continue;
         }

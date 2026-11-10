@@ -47,11 +47,7 @@ pub(crate) struct Caps<'t> {
 impl<'t> Caps<'t> {
     /// Group `i` (0 = whole match); `None` if the group did not take part in the match.
     pub(crate) fn get(&self, i: usize) -> Option<&'t str> {
-        self.spans
-            .get(i)
-            .copied()
-            .flatten()
-            .map(|(a, b)| &self.text[a..b])
+        self.spans.get(i).copied().flatten().map(|(a, b)| &self.text[a..b])
     }
 
     /// Group `i`, or `""` if it did not take part (Python's `m.group(i) or ""`).
@@ -113,8 +109,10 @@ impl Rx {
     }
 
     fn engine(&self) -> &Engine {
-        self.engine
-            .get_or_init(|| self.build().unwrap_or_else(|e| panic!("bad pattern {:?}: {e}", self.pattern)))
+        self.engine.get_or_init(|| {
+            self.build()
+                .unwrap_or_else(|e| panic!("bad pattern {:?}: {e}", self.pattern))
+        })
     }
 
     /// Compile now (tests use it to check every rule).
@@ -174,7 +172,10 @@ impl Rx {
                 if Rx::ruled_out(pre, s, 0) {
                     return Vec::new();
                 }
-                re.find_iter(s).map_while(Result::ok).map(|m| (m.start(), m.end())).collect()
+                re.find_iter(s)
+                    .map_while(Result::ok)
+                    .map(|m| (m.start(), m.end()))
+                    .collect()
             }
         }
     }
@@ -201,7 +202,10 @@ impl Rx {
                 if Rx::ruled_out(pre, s, 0) {
                     return Vec::new();
                 }
-                re.captures_iter(s).map_while(Result::ok).map(|c| fancy_spans_of(&c)).collect()
+                re.captures_iter(s)
+                    .map_while(Result::ok)
+                    .map(|c| fancy_spans_of(&c))
+                    .collect()
             }
         };
         all.into_iter().map(|spans| Caps { text: s, spans }).collect()
@@ -242,8 +246,9 @@ impl AnyRx {
         if patterns.is_empty() {
             return None;
         }
-        let (fancy, plain): (Vec<&String>, Vec<&String>) =
-            patterns.iter().partition(|p| translate(p).map(|t| t.fancy).unwrap_or(true));
+        let (fancy, plain): (Vec<&String>, Vec<&String>) = patterns
+            .iter()
+            .partition(|p| translate(p).map(|t| t.fancy).unwrap_or(true));
         let mut parts = Vec::new();
         if !plain.is_empty() {
             let joined: Vec<&str> = plain.iter().map(|p| p.as_str()).collect();
@@ -470,7 +475,10 @@ pub(crate) fn translate(p: &str) -> Result<Translated, String> {
                 let a = cs.get(i + 1).copied();
                 let b = cs.get(i + 2).copied();
                 let c = cs.get(i + 3).copied();
-                let look = matches!((a, b, c), (Some('?'), Some('=' | '!'), _) | (Some('?'), Some('<'), Some('=' | '!')));
+                let look = matches!(
+                    (a, b, c),
+                    (Some('?'), Some('=' | '!'), _) | (Some('?'), Some('<'), Some('=' | '!'))
+                );
                 if a == Some('?') && b == Some('#') {
                     // comment group
                     while i < cs.len() && cs[i] != ')' {
@@ -524,7 +532,11 @@ pub(crate) fn translate(p: &str) -> Result<Translated, String> {
             relaxed.push_str(&out[mark..]);
         }
     }
-    Ok(Translated { pattern: out, relaxed, fancy })
+    Ok(Translated {
+        pattern: out,
+        relaxed,
+        fancy,
+    })
 }
 
 // ---------- Python string helpers ----------
@@ -583,7 +595,13 @@ pub(crate) fn py_int(s: &str) -> Option<u64> {
 pub(crate) fn py_float(s: &str) -> Option<f64> {
     let ascii: Option<String> = s
         .chars()
-        .map(|c| if c == '.' { Some('.') } else { digit_value(c).and_then(|d| char::from_digit(d, 10)) })
+        .map(|c| {
+            if c == '.' {
+                Some('.')
+            } else {
+                digit_value(c).and_then(|d| char::from_digit(d, 10))
+            }
+        })
         .collect();
     ascii?.parse().ok()
 }
@@ -644,7 +662,10 @@ mod tests {
         assert!(r.is_match("12g\n"));
         assert!(!r.is_match("12g\n\n"));
         let t = py_template(r"glock \g<2> gen \g<1>").unwrap();
-        assert_eq!(Rx::new(r"\bglock gen\.? ?([1-6]) (\d{2})\b", true).replace_all("glock gen 5 19 mos", &t), "glock 19 gen 5 mos");
+        assert_eq!(
+            Rx::new(r"\bglock gen\.? ?([1-6]) (\d{2})\b", true).replace_all("glock gen 5 19 mos", &t),
+            "glock 19 gen 5 mos"
+        );
     }
 
     #[test]

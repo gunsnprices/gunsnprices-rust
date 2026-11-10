@@ -364,7 +364,12 @@ fn dicts() -> &'static [Dict] {
     static DICTS: OnceLock<Vec<Dict>> = OnceLock::new();
     DICTS.get_or_init(|| {
         let doc = json::parse(include_str!("../data/models.json"));
-        doc.get("dicts").map(Value::as_array).unwrap_or(&[]).iter().map(load_dict).collect()
+        doc.get("dicts")
+            .map(Value::as_array)
+            .unwrap_or(&[])
+            .iter()
+            .map(load_dict)
+            .collect()
     })
 }
 
@@ -412,7 +417,12 @@ fn find_models(t: &str, n: &Numeric) -> Vec<Found> {
     let mut found = Vec::new();
     for m in n.find.captures_iter(t) {
         let num = m.str(1).to_lowercase();
-        let suf = (if m.get(2).is_some_and(|x| !x.is_empty()) { m.str(2) } else { m.str(3) }).to_uppercase();
+        let suf = (if m.get(2).is_some_and(|x| !x.is_empty()) {
+            m.str(2)
+        } else {
+            m.str(3)
+        })
+        .to_uppercase();
         let both = format!("{num}{suf}");
         let code = if n.codes.contains_key(&both) {
             both
@@ -454,24 +464,40 @@ fn decode_mpn(name: &str, mpn: &str, sku: &str, n: &Numeric) -> Option<PartNumbe
         if let Some(m) = s.mpn_gen_us.captures(c) {
             let code = m.str(1).to_uppercase();
             if n.codes.contains_key(&code) {
-                return Some(PartNumber { code, mpn: c.to_owned(), gen: m.str(2).to_owned() });
+                return Some(PartNumber {
+                    code,
+                    mpn: c.to_owned(),
+                    gen: m.str(2).to_owned(),
+                });
             }
         }
         if let Some(m) = s.mpn_aut.captures(c) {
             if n.codes.contains_key(m.str(1)) {
-                return Some(PartNumber { code: m.str(1).to_owned(), mpn: c.to_owned(), gen: String::new() });
+                return Some(PartNumber {
+                    code: m.str(1).to_owned(),
+                    mpn: c.to_owned(),
+                    gen: String::new(),
+                });
             }
         }
         let Some(m) = s.mpn_letter.captures(c) else { continue };
         let letter = m.str(2).to_uppercase();
         let num = m.str(3).to_owned();
         let num = n.mpn_model_alias.get(&num).cloned().unwrap_or(num);
-        let code = n.mpn_letter_model.get(&format!("{letter}{num}")).cloned().unwrap_or(num);
+        let code = n
+            .mpn_letter_model
+            .get(&format!("{letter}{num}"))
+            .cloned()
+            .unwrap_or(num);
         if !n.codes.contains_key(&code) {
             continue;
         }
         let gen = n.mpn_letter_gen.get(&letter).cloned().unwrap_or_default();
-        return Some(PartNumber { code, mpn: c.to_owned(), gen });
+        return Some(PartNumber {
+            code,
+            mpn: c.to_owned(),
+            gen,
+        });
     }
     None
 }
@@ -491,7 +517,13 @@ fn parse_numeric(t: &str, name: &str, opts: &Options<'_>, d: &Dict, n: &Numeric)
         if let Some(m) = s.leading_code.captures(t) {
             let code = format!("{}{}", m.str(1), m.str(2).to_uppercase());
             if n.codes.contains_key(&code) {
-                models.push(Found { code, num: m.str(1).to_owned(), end: m.end(), mos: false, gen: String::new() });
+                models.push(Found {
+                    code,
+                    num: m.str(1).to_owned(),
+                    end: m.end(),
+                    mos: false,
+                    gen: String::new(),
+                });
             }
         }
     }
@@ -507,10 +539,8 @@ fn parse_numeric(t: &str, name: &str, opts: &Options<'_>, d: &Dict, n: &Numeric)
             });
         }
     }
-    if !own {
-        if models.is_empty() || d.block.as_ref().is_some_and(|rx| rx.is_match(t)) {
-            return None;
-        }
+    if !own && (models.is_empty() || d.block.as_ref().is_some_and(|rx| rx.is_match(t))) {
+        return None;
     }
     let mut src = Source::Title;
     let first = models.first();
@@ -532,7 +562,12 @@ fn parse_numeric(t: &str, name: &str, opts: &Options<'_>, d: &Dict, n: &Numeric)
     if let Some(f) = first.filter(|f| !f.gen.is_empty()) {
         gen = f.gen.clone();
     } else if let Some(m) = s.gen.captures(t) {
-        gen = [1, 2, 3].iter().map(|&i| m.str(i)).find(|g| !g.is_empty()).unwrap_or("").to_owned();
+        gen = [1, 2, 3]
+            .iter()
+            .map(|&i| m.str(i))
+            .find(|g| !g.is_empty())
+            .unwrap_or("")
+            .to_owned();
     } else if first.is_some_and(|f| s.gen_v.is_match(&t[f.end..])) {
         gen = "V".to_owned();
     } else if let Some(p) = pm.as_ref().filter(|p| !p.gen.is_empty() && p.code == code) {
@@ -548,12 +583,24 @@ fn parse_numeric(t: &str, name: &str, opts: &Options<'_>, d: &Dict, n: &Numeric)
         .filter(|c| c.rx.is_match(t) || (c.name == "MOS" && mos))
         .map(|c| c.name.clone())
         .collect();
-    let mut features: Vec<String> = d.features.iter().filter(|(_, rx)| rx.is_match(t)).map(|(f, _)| f.clone()).collect();
+    let mut features: Vec<String> = d
+        .features
+        .iter()
+        .filter(|(_, rx)| rx.is_match(t))
+        .map(|(f, _)| f.clone())
+        .collect();
     if pm.as_ref().is_some_and(|p| s.mpn_tb.is_match(&p.mpn)) && !features.iter().any(|f| f == "Threaded Barrel") {
         features.push("Threaded Barrel".to_owned());
     }
     let family = n.codes.get(&code).cloned().unwrap_or_default();
-    Some(Hit { code, family, gen, configs, features, src })
+    Some(Hit {
+        code,
+        family,
+        gen,
+        configs,
+        features,
+        src,
+    })
 }
 
 // ---------- terms mode (all other brands): ordered list of model patterns, first match wins ----------
@@ -594,7 +641,12 @@ fn parse_terms(t: &str, brand: Option<&str>, d: &Dict) -> Option<Hit> {
             configs.push(c.name.clone());
         }
     }
-    let features = d.features.iter().filter(|(_, rx)| rx.is_match(t)).map(|(f, _)| f.clone()).collect();
+    let features = d
+        .features
+        .iter()
+        .filter(|(_, rx)| rx.is_match(t))
+        .map(|(f, _)| f.clone())
+        .collect();
     Some(Hit {
         code: hit.name.clone(),
         family: hit.family.clone(),
@@ -646,7 +698,9 @@ fn leaf(r: &Hit, d: &Dict) -> String {
     };
     for name in &r.configs {
         // skip a config already spelled out in the name ("Plus Shield" on "S&W M&P Shield Plus")
-        let Some(c) = d.configs.iter().find(|c| &c.name == name) else { continue };
+        let Some(c) = d.configs.iter().find(|c| &c.name == name) else {
+            continue;
+        };
         if !c.in_name.is_match(&s) && !words(name).is_subset(&words(&s)) {
             s.push(' ');
             s.push_str(name);
@@ -737,25 +791,48 @@ pub fn identify_model_with(title: &str, opts: Options<'_>) -> Option<ModelMatch>
     })
 }
 
+/// Every compiled rule of the model dictionaries (the shared rules and each brand's), for the tests.
 #[cfg(test)]
-pub(crate) fn pattern_engines() -> (usize, usize) {
-    // (patterns on the regex crate, patterns on fancy-regex) across the dictionaries
-    let mut plain = 0;
-    let mut fancy = 0;
-    let mut count = |rx: &Rx| if rx.is_fancy() { fancy += 1 } else { plain += 1 };
+pub(crate) fn each_rule(mut f: impl FnMut(&Rx)) {
+    let s = shared();
+    for rx in [
+        &s.airgun,
+        &s.acc_noun,
+        &s.acc_included,
+        &s.gun_words,
+        &s.gen,
+        &s.gen_v,
+        &s.leading_code,
+        &s.mpn_in_title,
+        &s.mpn_gen_us,
+        &s.mpn_aut,
+        &s.mpn_letter,
+        &s.mpn_tb,
+    ] {
+        f(rx);
+    }
     for d in dicts() {
-        d.rewrite.iter().for_each(|(rx, _)| count(rx));
-        [&d.exclude, &d.exclude_soft, &d.block].into_iter().flatten().flat_map(AnyRx::parts).for_each(&mut count);
-        d.brand_start.iter().for_each(&mut count);
-        count(&d.brand_any);
-        d.configs.iter().for_each(|c| count(&c.rx));
-        d.features.iter().chain(&d.gens).for_each(|(_, rx)| count(rx));
+        d.rewrite.iter().for_each(|(rx, _)| f(rx));
+        [&d.exclude, &d.exclude_soft, &d.block]
+            .into_iter()
+            .flatten()
+            .flat_map(AnyRx::parts)
+            .for_each(&mut f);
+        d.brand_start.iter().for_each(&mut f);
+        f(&d.brand_any);
+        for c in &d.configs {
+            f(&c.rx);
+            f(&c.in_name);
+        }
+        d.features.iter().chain(&d.gens).for_each(|(_, rx)| f(rx));
         for m in &d.terms {
-            count(&m.rx);
-            if let Some(rx) = &m.not {
-                count(rx);
-            }
+            f(&m.rx);
+            m.not.iter().for_each(&mut f);
+        }
+        if let Some(n) = &d.numeric {
+            f(&n.find);
+            f(&n.own);
+            n.bare.iter().for_each(&mut f);
         }
     }
-    (plain, fancy)
 }

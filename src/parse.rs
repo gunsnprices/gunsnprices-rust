@@ -184,9 +184,13 @@ pub fn parse_title(title: &str) -> ProductInfo {
 /// ```
 pub fn parse_title_with(title: &str, opts: Options<'_>) -> ProductInfo {
     let opts = opts.normalized();
-    let kind = opts
-        .kind
-        .unwrap_or_else(|| if looks_like_ammo(title) { Kind::Ammo } else { Kind::Firearm });
+    let kind = opts.kind.unwrap_or_else(|| {
+        if looks_like_ammo(title) {
+            Kind::Ammo
+        } else {
+            Kind::Firearm
+        }
+    });
     let calibers = find_calibers(title);
     let mut info = ProductInfo {
         title: title.to_owned(),

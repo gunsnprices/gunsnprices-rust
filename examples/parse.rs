@@ -1,20 +1,31 @@
-use std::time::Instant;
+//! `cargo run --example parse`: parse a few store titles and print what was found.
+
+use gunsnprices::{normalize_caliber, parse_title, parse_title_with, Options};
+
 fn main() {
-    let text = std::fs::read_to_string("tests/golden.jsonl").unwrap();
-    let titles: Vec<String> = text.lines().filter_map(|l| {
-        let i = l.find("\"title\": \"")? + 10; let j = l[i..].find("\", ")? ; Some(l[i..i+j].to_string())
-    }).collect();
-    let t = Instant::now(); let _ = gunsnprices::find_calibers("x"); println!("calibers init {:?}", t.elapsed());
-    let t = Instant::now(); let _ = gunsnprices::identify_model("x"); println!("models init {:?}", t.elapsed());
-    let t = Instant::now(); let _ = gunsnprices::barrel_length("x"); let _ = gunsnprices::looks_like_ammo("x"); println!("specs init {:?}", t.elapsed());
-    for round in 0..3 { println!("round {round}"); for (name, f) in [
-        ("find_calibers", (|s: &str| { let _ = gunsnprices::find_calibers(s); }) as fn(&str)),
-        ("identify_model", |s: &str| { let _ = gunsnprices::identify_model(s); }),
-        ("specs", |s: &str| { let _ = (gunsnprices::barrel_length(s), gunsnprices::magazine_capacity(s), gunsnprices::rounds_per_box(s), gunsnprices::looks_like_ammo(s)); }),
-        ("parse_title", |s: &str| { let _ = gunsnprices::parse_title(s); }),
+    for title in [
+        "Glock 19 Gen 5 MOS 9mm 4.02in 15rd Pistol PA195S203MOS",
+        "Ruger GP100 .357 Mag / .38 Special 4.2in 6-shot Revolver",
+        "Beretta 686 Silver Pigeon I O/U 12/28 BL/WD 3\"",
     ] {
-        let t = Instant::now();
-        for s in &titles { f(s); }
-        println!("{name}: {:?} per title ({} titles)", t.elapsed() / titles.len() as u32, titles.len());
-    } }
+        let info = parse_title(title);
+        println!("{title}");
+        println!("  kind:     {}", info.kind);
+        println!("  model:    {}", info.model.as_ref().map_or("-", |m| m.model.as_str()));
+        let calibers: Vec<&str> = info.calibers.iter().map(|c| c.name).collect();
+        println!("  calibers: {}", calibers.join(", "));
+        println!("  capacity: {:?}, barrel: {:?} in", info.capacity, info.barrel_length);
+    }
+
+    let title = "Federal American Eagle 9mm Luger 115gr FMJ, 50/Box";
+    let info = parse_title_with(title, Options::new().price(18.99));
+    println!("{title}");
+    println!(
+        "  kind: {}, rounds: {:?}, cost per round: {:?}",
+        info.kind, info.rounds, info.cost_per_round
+    );
+
+    if let Some(c) = normalize_caliber("308 WIN (7.62X51 NATO)") {
+        println!("\"308 WIN (7.62X51 NATO)\" -> {} ({}, {})", c.name, c.id, c.kind);
+    }
 }

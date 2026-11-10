@@ -65,7 +65,9 @@ mod specs;
 #[rustfmt::skip]
 mod tables;
 
-pub use calibers::{caliber_by_id, find_caliber, find_calibers, list_calibers, normalize_caliber, Caliber, CaliberKind};
+pub use calibers::{
+    caliber_by_id, find_caliber, find_calibers, list_calibers, normalize_caliber, Caliber, CaliberKind,
+};
 pub use models::{identify_model, identify_model_with, list_brands, ModelMatch, Source};
 pub use parse::{parse_title, parse_title_with, Kind, Options, ParseKindError, ProductInfo};
 pub use specs::{barrel_length, cost_per_round, looks_like_ammo, magazine_capacity, rounds_per_box};
@@ -75,10 +77,39 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[cfg(test)]
 mod tests {
+    /// Rules compile lazily, so a pattern no golden title reaches would only fail in use: compile them all here.
     #[test]
-    fn engines() {
-        let (plain, fancy) = crate::models::pattern_engines();
+    fn every_dictionary_rule_compiles() {
+        let (mut plain, mut fancy) = (0, 0);
+        let mut bad = Vec::new();
+        crate::models::each_rule(|rx| {
+            if rx.is_fancy() {
+                fancy += 1;
+            } else {
+                plain += 1;
+            }
+            if let Err(e) = rx.compile() {
+                bad.push(e);
+            }
+        });
         eprintln!("dictionary patterns: {plain} on regex, {fancy} on fancy-regex");
+        assert!(
+            bad.is_empty(),
+            "{} patterns do not compile: {:?}",
+            bad.len(),
+            &bad[..bad.len().min(5)]
+        );
         assert!(plain > fancy);
+    }
+
+    #[test]
+    fn caliber_spellings() {
+        let table = crate::calibers::debug_spellings();
+        // the Python package builds 946 spellings from the same data
+        assert_eq!(table.len(), 946);
+        let find = |k: &str| table.iter().find(|(key, _, _)| key == k).map(|t| t.2);
+        assert_eq!(find("9mm"), Some("9x19mmparabellum"));
+        assert_eq!(find("300blk"), Some("300aacblackout"));
+        assert_eq!(find("12ga"), Some("12gauge"));
     }
 }

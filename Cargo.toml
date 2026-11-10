@@ -46,9 +46,6 @@ name = "gunsnprices"
 path = "src/bin/gunsnprices.rs"
 required-features = ["cli"]
 
-[[example]]
-name = "parse"
-path = "examples/parse.rs"
 
 [package.metadata.docs.rs]
 all-features = true

@@ -19,7 +19,8 @@ fn numeric(digits: &str, radix: u32) -> String {
     let num = digits
         .chars()
         .try_fold(0u64, |acc, c| {
-            acc.checked_mul(u64::from(radix))?.checked_add(u64::from(c.to_digit(radix)?))
+            acc.checked_mul(u64::from(radix))?
+                .checked_add(u64::from(c.to_digit(radix)?))
         })
         .unwrap_or(u64::MAX);
     if let Ok(i) = INVALID_CHARREFS.binary_search_by_key(&num, |&(k, _)| u64::from(k)) {

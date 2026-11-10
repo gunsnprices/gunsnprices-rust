@@ -169,7 +169,8 @@ impl Parser<'_> {
             Some(b'n') => self.lit("null", Value::Null),
             Some(c) if *c == b'-' || c.is_ascii_digit() => {
                 let start = self.i;
-                while self.i < self.b.len() && matches!(self.b[self.i], b'-' | b'+' | b'.' | b'e' | b'E' | b'0'..=b'9') {
+                while self.i < self.b.len() && matches!(self.b[self.i], b'-' | b'+' | b'.' | b'e' | b'E' | b'0'..=b'9')
+                {
                     self.i += 1;
                 }
                 match self.src[start..self.i].parse::<f64>() {
@@ -182,7 +183,10 @@ impl Parser<'_> {
     }
 
     fn hex4(&mut self) -> u32 {
-        let h = self.src.get(self.i..self.i + 4).unwrap_or_else(|| self.fail("short \\u escape"));
+        let h = self
+            .src
+            .get(self.i..self.i + 4)
+            .unwrap_or_else(|| self.fail("short \\u escape"));
         let v = u32::from_str_radix(h, 16).unwrap_or_else(|_| self.fail("bad \\u escape"));
         self.i += 4;
         v

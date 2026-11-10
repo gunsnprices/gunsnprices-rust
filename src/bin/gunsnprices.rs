@@ -126,7 +126,11 @@ fn run() -> Result<(), String> {
         let json = serde_json::to_string(&parse_title_with(title, opts)).map_err(|e| e.to_string())?;
         if let Err(e) = writeln!(out, "{json}") {
             // stop quietly when the reader goes away (`| head`)
-            return if e.kind() == io::ErrorKind::BrokenPipe { Ok(()) } else { Err(e.to_string()) };
+            return if e.kind() == io::ErrorKind::BrokenPipe {
+                Ok(())
+            } else {
+                Err(e.to_string())
+            };
         }
     }
     out.flush().map_err(io_err)

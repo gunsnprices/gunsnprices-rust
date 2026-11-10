@@ -8,7 +8,14 @@ use serde_json::{json, Value};
 
 fn compact(info: &ProductInfo) -> Value {
     let model = info.model.as_ref().map(|m| {
-        json!([m.family, m.model, m.generation, m.configs, m.features, m.source.as_str()])
+        json!([
+            m.family,
+            m.model,
+            m.generation,
+            m.configs,
+            m.features,
+            m.source.as_str()
+        ])
     });
     json!({
         "kind": info.kind.as_str(),
@@ -62,11 +69,18 @@ fn golden() {
         let got = compact(&parse_title_with(title, opts));
         total += 1;
         if !same(&got, &case["expected"]) {
-            failures.push(format!("{title}\n    expected {}\n    got      {got}", case["expected"]));
+            failures.push(format!(
+                "{title}\n    expected {}\n    got      {got}",
+                case["expected"]
+            ));
         }
     }
     assert_eq!(total, 1150, "golden.jsonl should have 1,150 cases");
-    eprintln!("golden: {}/{} titles parse exactly like the Python package", total - failures.len(), total);
+    eprintln!(
+        "golden: {}/{} titles parse exactly like the Python package",
+        total - failures.len(),
+        total
+    );
     assert!(
         failures.is_empty(),
         "{} mismatches:\n{}",
