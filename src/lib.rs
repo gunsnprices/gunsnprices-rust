@@ -75,6 +75,11 @@ pub use specs::{barrel_length, cost_per_round, looks_like_ammo, magazine_capacit
 /// Version of this crate.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
+/// The examples in README.md run as doctests.
+#[cfg(doctest)]
+#[doc = include_str!("../README.md")]
+struct ReadmeDoctests;
+
 #[cfg(test)]
 mod tests {
     /// Rules compile lazily, so a pattern no golden title reaches would only fail in use: compile them all here.

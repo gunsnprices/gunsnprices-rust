@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+  RUSTDOCFLAGS: -D warnings
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - run: cargo fmt --check
+        if: matrix.os == 'ubuntu-latest'
+      - run: cargo clippy --all-targets --all-features -- -D warnings
+        if: matrix.os == 'ubuntu-latest'
+      - run: cargo test --all-features
+      - run: cargo test --release --test golden
+        if: matrix.os == 'ubuntu-latest'
+      - run: cargo doc --no-deps --all-features
+        if: matrix.os == 'ubuntu-latest'
+      - run: cargo package --list && cargo publish --dry-run
+        if: matrix.os == 'ubuntu-latest'
+
+  msrv:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.71
+      # Cargo 1.71 reads lockfile format 3; with only crates.io dependencies, format 4 differs just in the number
+      - run: sed -i 's/^version = 4$/version = 3/' Cargo.lock
+      - run: cargo test --all-features
+
+  tables:
+    # src/tables.rs is generated from Python 3.13's standard library (Unicode 15.1)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      # line 1 names the exact Python version
+      - run: diff <(python3 tools/gen_tables.py | tail -n +2) <(tail -n +2 src/tables.rs)
+        shell: bash
